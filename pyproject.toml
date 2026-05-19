@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fedcloud-jupyterhub-client"
+version = "0.1.0"
+description = "Standalone client and CLI for JupyterHub operations originally integrated in fedcloudclient."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "Apache-2.0"}
+authors = [{name = "EGI Foundation"}]
+dependencies = [
+    "click",
+    "requests",
+]
+
+[project.scripts]
+fedcloud-jupyterhub = "fedcloud_jupyterhub.cli:jupyterhub"
+
+[tool.setuptools.packages.find]
+include = ["fedcloud_jupyterhub*"]
