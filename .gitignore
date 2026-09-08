@@ -9,3 +9,6 @@ __pycache__/
 venv/
 dist/
 build/
+.coverage
+jupyterhub.sqlite
+jupyterhub_cookie_secret

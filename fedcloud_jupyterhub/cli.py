@@ -1,278 +1,234 @@
-"""
-Implementation of "fedcloud jupyterhub" for communicating with JupyterHub instances
-in OpenStack CLI like fashion
+"""Optional Click command-line interface for :mod:`fedcloud_jupyterhub`.
+
+The CLI deliberately contains no JupyterHub business logic. It collects
+command-line parameters, creates a :class:`JupyterHubClient` for the requested
+Hub, invokes one of its public methods, renders successful output, and
+translates library exceptions into Click errors. Keeping this layer thin makes
+the object-oriented library API the single recommended integration surface for
+both Python applications and command-line users.
 """
 
 import json
 from functools import wraps
+from typing import Any, Callable
 
 import click
 
-from fedcloud_jupyterhub.client import (
-    JupyterHubClientError,
-    get_servers,
-    get_user,
-    start_server,
-    stop_server,
-    add_token,
-    list_tokens,
-    get_token,
-    delete_token,
-    exec_command,
-    upload_file,
-    add_path,
-    get_path,
-    delete_path,
-    add_shared_access,
-    remove_shared_access,
-    list_shared_access,
-)
+from fedcloud_jupyterhub.client import JupyterHubClient
+from fedcloud_jupyterhub.exceptions import JupyterHubError
 
 
-# Main function calling lib functions
-def jupyterhub_full(callback_func, **kwargs):
+def jupyterhub_full(method_name: str, **kwargs: Any) -> None:
+    """Invoke one public :class:`JupyterHubClient` method for a CLI command.
+
+    ``hub_api_endpoint``, ``token``, and ``user`` describe the client context
+    and are consumed when the client object is created. All remaining keyword
+    arguments are operation-specific and are forwarded to the selected client
+    method. This keeps connection parameters out of individual method calls and
+    mirrors the recommended Python API.
+
+    Library exceptions remain structured and catchable for Python callers. At
+    the CLI boundary they are converted into :class:`click.ClickException` so
+    users receive a concise message and a non-zero process exit status.
     """
-    Calls provided callback func
-    """
+    client_kwargs = {
+        "hub_api_endpoint": kwargs.pop("hub_api_endpoint"),
+        "token": kwargs.pop("token"),
+        "user": kwargs.pop("user", None),
+    }
+    output_format = kwargs.get("output")
+
     try:
-        response_output = callback_func(**kwargs)
-    except JupyterHubClientError as exc:
+        client = JupyterHubClient(**client_kwargs)
+        method = getattr(client, method_name)
+        response_output = method(**kwargs)
+    except JupyterHubError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if response_output is not None:
-        if "output" in kwargs and kwargs["output"] == "text":
-            print(response_output, end="")
-        else:
-            print(json.dumps(response_output, indent=4))
+    if response_output is None:
+        return
+
+    if output_format == "text" and isinstance(response_output, str):
+        click.echo(response_output, nl=False)
+    else:
+        click.echo(json.dumps(response_output, indent=4))
 
 
-# Decorator for required Jupyterhub hub param
-def common_hub_params(func):
-    """
-    Common Hub params func wrapper
-    """
+def common_hub_params(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Add connection and optional target-user parameters to a CLI command."""
 
     @click.option(
         "--hub-api-endpoint",
         "-e",
         required=True,
-        help="JupyterHub API endpoint",
+        help="JupyterHub API endpoint, usually ending in /hub/api/.",
     )
     @click.option(
         "--token",
         "-t",
         required=True,
-        help="JupyterHub API token",
+        help="JupyterHub API token.",
     )
     @click.option(
         "--user",
-        help="ID of Jupyterhub user, if not specified token's owner ID is used",
+        help="JupyterHub user name. If omitted, the token owner is used.",
     )
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        func(*args, **kwargs)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
 
     return wrapper
 
 
-# Decorator for server name param
-def server_name(func):
-    """
-    Server name param func wrapper
-    """
+def server_name(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Add the server-name parameter shared by server-specific commands."""
 
     @click.option(
         "--server",
         required=True,
-        help='Name of the Jupyter server. For a nameless server use: --server ""',
+        help='Jupyter server name. Use --server "" for the default server.',
     )
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        func(*args, **kwargs)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
 
     return wrapper
 
 
-# Decorator for include_stopped_servers param
-def include_stopped_servers(func):
-    """
-    Include stopped server param func wrapper
-    """
+def include_stopped_servers(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Add the flag controlling whether stopped named servers are requested."""
 
     @click.option(
         "--include-stopped-servers",
         is_flag=True,
-        flag_value=True,
         default=False,
-        help="Include stopped servers",
+        help="Include stopped named servers in the user/server model.",
     )
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        func(*args, **kwargs)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
 
     return wrapper
 
 
-# Decorator for token_id param
-def api_token_id(func):
-    """
-    Api token param func wrapper
-    """
+def api_token_id(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Add the API-token identifier used by token show/remove commands."""
 
-    @click.option(
-        "--api-token-id",
-        required=True,
-        help="API token ID",
-    )
+    @click.option("--api-token-id", required=True, help="JupyterHub API token ID.")
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        func(*args, **kwargs)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
 
     return wrapper
 
 
 @click.group()
-def jupyterhub():
-    """
-    Communicate with Jupyterhub
-    """
+def jupyterhub() -> None:
+    """Communicate with JupyterHub."""
 
 
 @jupyterhub.group()
-def user():
-    """
-    JupyterHub user subcommand
-    """
+def user() -> None:
+    """Inspect JupyterHub users."""
 
 
 @user.command("show")
 @include_stopped_servers
 @common_hub_params
-def show_user(**kwargs):
-    """
-    Get user details
-    """
-    jupyterhub_full(get_user, **kwargs)
+def show_user(**kwargs: Any) -> None:
+    """Show a JupyterHub user model."""
+    jupyterhub_full("get_user", **kwargs)
 
 
 @jupyterhub.group()
-def server():
-    """
-    JupyterHub server subcommand
-    """
+def server() -> None:
+    """Manage JupyterHub user servers."""
 
 
 @server.command("list")
 @include_stopped_servers
 @common_hub_params
-def list_servers(**kwargs):
-    """
-    JupyterHub server subcommand
-    """
-    jupyterhub_full(get_servers, **kwargs)
+def list_servers(**kwargs: Any) -> None:
+    """List servers belonging to a JupyterHub user."""
+    jupyterhub_full("get_servers", **kwargs)
 
 
 @server.command("start")
 @click.option(
     "--options",
-    help="""
-    User options JSON to be passed to the server, e.g. different image, 
-    spawner profile, etc., must valid json!!""",
+    help="Spawner options as a JSON object, for example a profile or image selection.",
 )
 @common_hub_params
 @server_name
-def start_user_server(**kwargs):
-    """
-    Start named server
-    """
-    jupyterhub_full(start_server, **kwargs)
+def start_user_server(**kwargs: Any) -> None:
+    """Start a named or default JupyterHub server."""
+    jupyterhub_full("start_server", **kwargs)
 
 
 @server.command("stop")
 @common_hub_params
 @server_name
-def stop_user_server(**kwargs):
-    """
-    Stop named server
-    """
-    jupyterhub_full(stop_server, **kwargs)
+def stop_user_server(**kwargs: Any) -> None:
+    """Stop a named or default JupyterHub server."""
+    jupyterhub_full("stop_server", **kwargs)
 
 
 @jupyterhub.group()
-def token():
-    """
-    JupyterHub token subcommand
-    """
+def token() -> None:
+    """Manage JupyterHub API tokens."""
 
 
 @token.command("add")
 @click.option(
     "--expiration",
     type=int,
-    help="API token duration before it expires in seconds, 0 or ommitting means no expiration",
+    help="Token lifetime in seconds. Zero requests a non-expiring token.",
 )
-@click.option(
-    "--note",
-    help="API token description note for a new token",
-)
+@click.option("--note", help="Human-readable description of the new token.")
 @click.option(
     "--role",
     "-r",
     multiple=True,
-    help="""
-    Scopes from a role for new token, can be specified multiple times, e.g. -r user -r admin
-    Cannot be specified together with --scope options""",
+    help="Role for the new token. May be repeated and cannot be combined with --scope.",
 )
 @click.option(
     "--scope",
     "-s",
     multiple=True,
-    help="""
-    Scope for new token, can be specified multiple times, e.g. -s access:servers -s inherit
-    Cannot be specified together with --role options""",
+    help="Scope for the new token. May be repeated and cannot be combined with --role.",
 )
 @common_hub_params
-def generate_api_token(**kwargs):
-    """
-    Generate API token
-    """
-    jupyterhub_full(add_token, **kwargs)
+def generate_api_token(**kwargs: Any) -> None:
+    """Create a JupyterHub API token."""
+    jupyterhub_full("add_token", **kwargs)
 
 
 @token.command("list")
 @common_hub_params
-def list_api_tokens(**kwargs):
-    """
-    Lists existing API token
-    """
-    jupyterhub_full(list_tokens, **kwargs)
+def list_api_tokens(**kwargs: Any) -> None:
+    """List API tokens belonging to a user."""
+    jupyterhub_full("list_tokens", **kwargs)
 
 
 @token.command("show")
 @common_hub_params
 @api_token_id
-def show_api_token(**kwargs):
-    """
-    Shows existing API token
-    """
-    jupyterhub_full(get_token, **kwargs)
+def show_api_token(**kwargs: Any) -> None:
+    """Show one API token by ID."""
+    jupyterhub_full("get_token", **kwargs)
 
 
 @token.command("rm")
 @common_hub_params
 @api_token_id
-def delete_api_token(**kwargs):
-    """
-    Deletes existing API token
-    """
-    jupyterhub_full(delete_token, **kwargs)
+def delete_api_token(**kwargs: Any) -> None:
+    """Delete one API token by ID."""
+    jupyterhub_full("delete_token", **kwargs)
 
 
 @jupyterhub.group()
-def sharing():
-    """
-    JupyterHub user share-access subcommand
-    """
+def sharing() -> None:
+    """Manage JupyterHub server sharing."""
 
 
 @sharing.command("add")
@@ -280,78 +236,63 @@ def sharing():
     "--scope",
     "-s",
     multiple=True,
-    help="""
-    Scope for granted access, can be specified multiple times, e.g. -s access:servers -s inherit
-    If no scopes are specified, access:servers!server=:username/:servername is going to be used.
-    """,
+    help="Scope to grant. May be repeated; Hub defaults apply when omitted.",
 )
 @click.option(
     "--grant-to-user",
-    help="""ID of user to grant a shared access to the specified server, only one at the time,
-    cannot be specified when --grant-to-group is used""",
+    help="User receiving access. Cannot be combined with --grant-to-group.",
 )
 @click.option(
     "--grant-to-group",
-    help="""ID of group to grant a shared access to the specified server, only one at the time,
-    cannot be specified when --grant-to-user is used""",
+    help="Group receiving access. Cannot be combined with --grant-to-user.",
 )
 @server_name
 @common_hub_params
-def add_sharing(**kwargs):
-    """
-    Add server share
-    """
-    jupyterhub_full(add_shared_access, **kwargs)
+def add_sharing(**kwargs: Any) -> None:
+    """Grant access to a server."""
+    jupyterhub_full("add_shared_access", **kwargs)
 
 
 @sharing.command("rm")
 @click.option(
     "--all",
+    "remove_all",
     is_flag=True,
-    flag_value=True,
     default=False,
-    help="If specified, all shared access of all invitied users will be removed, regardless of specified scopes",
+    help="Remove all shared access from the server.",
 )
 @click.option(
     "--remove-from-user",
-    help="ID of user to remove a shared access from to the specified server, only one at the time",
+    help="User whose access is removed. Cannot be combined with --remove-from-group.",
 )
 @click.option(
     "--remove-from-group",
-    help="ID of group to grant a shared access from to the specified server, only one at the time",
+    help="Group whose access is removed. Cannot be combined with --remove-from-user.",
 )
 @click.option(
     "--scope",
     "-s",
     multiple=True,
-    help="""
-    Scopes, can be specified multiple times, e.g. -s access:servers -s inherit
-    If no scopes are specified, all scopes will be removed""",
+    help="Scope to remove. May be repeated.",
 )
 @server_name
 @common_hub_params
-def remove_sharing(**kwargs):
-    """
-    Remove server share
-    """
-    jupyterhub_full(remove_shared_access, **kwargs)
+def remove_sharing(**kwargs: Any) -> None:
+    """Remove access from a server."""
+    jupyterhub_full("remove_shared_access", **kwargs)
 
 
 @sharing.command("list")
 @server_name
 @common_hub_params
-def list_sharing(**kwargs):
-    """
-    List server shares
-    """
-    jupyterhub_full(list_shared_access, **kwargs)
+def list_sharing(**kwargs: Any) -> None:
+    """List server sharing information."""
+    jupyterhub_full("list_shared_access", **kwargs)
 
 
 @jupyterhub.group()
-def path():
-    """
-    Jupyterhub path subcommand
-    """
+def path() -> None:
+    """Manage files and directories through the Jupyter Contents API."""
 
 
 @path.command("show")
@@ -360,22 +301,19 @@ def path():
     "-p",
     required=True,
     type=click.Path(readable=False),
-    help="Path to the file or directory to show",
+    help="Server path to inspect.",
 )
 @click.option(
     "--show-content",
     is_flag=True,
-    flag_value=True,
     default=False,
-    help="If specified, path contents are displayed",
+    help="Include file or directory contents in the response.",
 )
 @server_name
 @common_hub_params
-def path_show(**kwargs):
-    """
-    Lists file/directory contents on specified path
-    """
-    jupyterhub_full(get_path, **kwargs)
+def path_show(**kwargs: Any) -> None:
+    """Show a file or directory model."""
+    jupyterhub_full("get_path", **kwargs)
 
 
 @path.command("add")
@@ -383,39 +321,32 @@ def path_show(**kwargs):
     "--destination",
     "-d",
     required=True,
-    type=click.Path(
-        readable=False,
-    ),
-    help="Path where new file/directory will be created on the running server",
+    type=click.Path(readable=False),
+    help="Server path where the new item is created.",
 )
 @click.option(
     "--name",
     "-n",
-    type=click.Path(
-        readable=False,
-    ),
-    help="Name of the new file/directory to create, if not specified, default is used",
+    type=click.Path(readable=False),
+    help="Optional final name for the created item.",
 )
 @click.option(
     "--copy-from",
-    type=click.Path(
-        readable=False,
-    ),
-    help="Path on the server to copy content to the path on the running server",
+    type=click.Path(readable=False),
+    help="Optional server-side path whose content should be copied.",
 )
 @click.option(
     "--type",
+    "path_type",
     required=True,
     type=click.Choice(["file", "directory"]),
-    help="Type of the item to create",
+    help="Type of item to create.",
 )
 @server_name
 @common_hub_params
-def path_add(**kwargs):
-    """
-    Add file or directory at the specified path on running server
-    """
-    jupyterhub_full(add_path, **kwargs)
+def path_add(**kwargs: Any) -> None:
+    """Create a file or directory on a running server."""
+    jupyterhub_full("add_path", **kwargs)
 
 
 @path.command("rm")
@@ -423,26 +354,19 @@ def path_add(**kwargs):
     "--path",
     "-p",
     required=True,
-    type=click.Path(
-        readable=False,
-    ),
-    help="Path to file to delete",
+    type=click.Path(readable=False),
+    help="File or empty-directory path to delete.",
 )
 @server_name
 @common_hub_params
-def path_remove(**kwargs):
-    """
-    Remove file or directory at the specified path on running server,
-    directory must be empty
-    """
-    jupyterhub_full(delete_path, **kwargs)
+def path_remove(**kwargs: Any) -> None:
+    """Delete a file or empty directory from a running server."""
+    jupyterhub_full("delete_path", **kwargs)
 
 
 @jupyterhub.group()
-def file():
-    """
-    Jupyterhub file subcommand
-    """
+def file() -> None:
+    """Upload local files to a running Jupyter server."""
 
 
 @file.command("add")
@@ -451,24 +375,20 @@ def file():
     "-f",
     required=True,
     type=click.Path(exists=True, dir_okay=False),
-    help="Path to the file to be uploaded on the running server",
+    help="Local file to upload.",
 )
 @click.option(
     "--destination",
     "-d",
     required=True,
     type=click.Path(readable=False),
-    help="""Path to the file to be uploaded on the running server.
-    Important!, the root dir is the root dir used by Jupyter server process!!,
-    If the destination is file, it will be overwritten""",
+    help="Existing destination file or directory on the running server.",
 )
 @server_name
 @common_hub_params
-def file_add(**kwargs):
-    """
-    Uploads and/or overwrites file at the specified path on running server
-    """
-    jupyterhub_full(upload_file, **kwargs)
+def file_add(**kwargs: Any) -> None:
+    """Upload or overwrite a file on a running server."""
+    jupyterhub_full("upload_file", **kwargs)
 
 
 @jupyterhub.command("exec")
@@ -477,13 +397,11 @@ def file_add(**kwargs):
     "-o",
     default="text",
     type=click.Choice(["json", "text"]),
-    help="Type out the output to provide",
+    help="Output representation returned by the JupyterLab control endpoint.",
 )
 @click.argument("command", nargs=-1)
 @server_name
 @common_hub_params
-def execute(**kwargs):
-    """
-    JupyterHub exec subcommand
-    """
-    jupyterhub_full(exec_command, **kwargs)
+def execute(**kwargs: Any) -> None:
+    """Execute a command through the JupyterLab control endpoint."""
+    jupyterhub_full("exec_command", **kwargs)

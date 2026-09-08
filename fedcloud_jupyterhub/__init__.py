@@ -1,8 +1,7 @@
-"""Standalone client library for interacting with JupyterHub APIs."""
+"""Public API for the standalone JupyterHub adapter library."""
 
 from fedcloud_jupyterhub.client import (
     JupyterHubClient,
-    JupyterHubClientError,
     add_path,
     add_shared_access,
     add_token,
@@ -20,10 +19,29 @@ from fedcloud_jupyterhub.client import (
     stop_server,
     upload_file,
 )
+from fedcloud_jupyterhub.exceptions import (
+    JupyterHubAPIError,
+    JupyterHubAuthenticationError,
+    JupyterHubClientError,
+    JupyterHubError,
+    JupyterHubFileError,
+    JupyterHubNotFoundError,
+    JupyterHubRequestError,
+    JupyterHubResponseError,
+    JupyterHubValidationError,
+)
 
 __all__ = [
+    "JupyterHubAPIError",
+    "JupyterHubAuthenticationError",
     "JupyterHubClient",
     "JupyterHubClientError",
+    "JupyterHubError",
+    "JupyterHubFileError",
+    "JupyterHubNotFoundError",
+    "JupyterHubRequestError",
+    "JupyterHubResponseError",
+    "JupyterHubValidationError",
     "add_path",
     "add_shared_access",
     "add_token",
